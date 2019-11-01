@@ -34,7 +34,7 @@ Rename this file to lodepng.cpp to use it for C++, or to lodepng.c to use it for
 #include "block.h"
 #endif  
 
-
+#include "lvgl/lvgl.h"
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,7 +67,7 @@ from here.*/
 #ifdef LODEPNG_COMPILE_ALLOCATORS
 
 #ifdef MEM_BLOCK
-static void* lodepng_malloc(size_t size)
+void* lodepng_malloc(size_t size)
 {
 #ifdef LODEPNG_MAX_ALLOC
   if(size > LODEPNG_MAX_ALLOC) return 0;
@@ -76,7 +76,7 @@ static void* lodepng_malloc(size_t size)
   return GetMem(size);
 }
 
-static void* lodepng_realloc(void* ptr, size_t new_size)
+void* lodepng_realloc(void* ptr, size_t new_size)
 {
   void *n;
   size_t size;
@@ -111,35 +111,35 @@ static void* lodepng_realloc(void* ptr, size_t new_size)
   return n;
 }
 
-static void lodepng_free(void* ptr)
+void lodepng_free(void* ptr)
 {
   // printf("%s\n", __FUNCTION__); 
   FreeMem(ptr);
 }
 
 #else
-static void* lodepng_malloc(size_t size)
+void* lodepng_malloc(size_t size)
 {
 #ifdef LODEPNG_MAX_ALLOC
   if(size > LODEPNG_MAX_ALLOC) return 0;
 #endif
-  // printf("%s - %zd\n", __FUNCTION__, size);
-  return malloc(size);
+  //printf("%s - %u\n", __FUNCTION__, size);
+  return lv_mem_alloc(size);;
 }
 
-static void* lodepng_realloc(void* ptr, size_t new_size)
+ void* lodepng_realloc(void* ptr, size_t new_size)
 {
 #ifdef LODEPNG_MAX_ALLOC
   if(new_size > LODEPNG_MAX_ALLOC) return 0;
 #endif
-  // printf("%s - %zd\n", __FUNCTION__, new_size);
-  return realloc(ptr, new_size);
+  //printf("%s - %u\n", __FUNCTION__, new_size); 
+  return lv_mem_realloc(ptr, new_size);
 }
 
-static void lodepng_free(void* ptr)
+void lodepng_free(void* ptr)
 {
-  // printf("%s\n", __FUNCTION__);
-  free(ptr);
+  //printf("%s\n", __FUNCTION__);
+  lv_mem_free(ptr);
 }
 #endif
 #else /*LODEPNG_COMPILE_ALLOCATORS*/
@@ -420,35 +420,32 @@ static void lodepng_add32bitInt(ucvector* buffer, unsigned value)
 /* returns negative value on error. This should be pure C compatible, so no fstat. */
 static long lodepng_filesize(const char* filename)
 {
-  FILE* file;
-  long size;
-  file = fopen(filename, "rb");
-  if(!file) return -1;
+  lv_fs_file_t file;
+  uint32_t size;
+  
+  if(lv_fs_open(&file, filename, LV_FS_MODE_RD) != LV_FS_RES_OK) return -1;
 
-  if(fseek(file, 0, SEEK_END) != 0)
+  if(lv_fs_size(&file, &size) != LV_FS_RES_OK)
   {
-    fclose(file);
+    lv_fs_close(&file);
     return -1;
   }
-
-  size = ftell(file);
   /* It may give LONG_MAX as directory size, this is invalid for us. */
   if(size == LONG_MAX) size = -1;
 
-  fclose(file);
+  lv_fs_close(&file);
   return size;
 }
 
 /* load file into buffer that already has the correct allocated size. Returns error code.*/
 static unsigned lodepng_buffer_file(unsigned char* out, size_t size, const char* filename)
 {
-  FILE* file;
-  size_t readsize;
-  file = fopen(filename, "rb");
-  if(!file) return 78;
+  lv_fs_file_t file;
+  uint32_t readsize;
 
-  readsize = fread(out, 1, size, file);
-  fclose(file);
+  if(lv_fs_open(&file, filename, LV_FS_MODE_RD) != LV_FS_RES_OK) return 78;
+  lv_fs_read(&file, out, size , &readsize);
+  lv_fs_close(&file);
 
   if (readsize != size) return 78;
   return 0;
@@ -462,18 +459,23 @@ unsigned lodepng_load_file(unsigned char** out, size_t* outsize, const char* fil
 
   *out = (unsigned char*)lodepng_malloc((size_t)size);
   if(!(*out) && size > 0) return 83; /*the above malloc failed*/
-
-  return lodepng_buffer_file(*out, (size_t)size, filename);
+  unsigned ret = lodepng_buffer_file(*out, (size_t)size, filename);
+  if(ret != 0)
+  {
+    lodepng_free(*out);
+    *out = NULL;
+  }
+  return ret;
 }
 
 /*write given buffer to the file, overwriting the file, it doesn't append to it.*/
 unsigned lodepng_save_file(const unsigned char* buffer, size_t buffersize, const char* filename)
 {
-  FILE* file;
-  file = fopen(filename, "wb" );
-  if(!file) return 79;
-  fwrite((char*)buffer , 1 , buffersize, file);
-  fclose(file);
+  lv_fs_file_t file;
+  uint32_t bw = 0;
+  if(lv_fs_open(&file, filename, LV_FS_MODE_WR )!= LV_FS_RES_OK) return 79;
+  lv_fs_write(&file, (const void*)buffer, buffersize, &bw);
+  lv_fs_close(&file);
   return 0;
 }
 

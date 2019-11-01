@@ -69,27 +69,29 @@ static lv_res_t decoder_info(struct _lv_img_decoder * decoder, const void * src,
      if(src_type == LV_IMG_SRC_FILE) {
          const char * fn = src;
          if(!strcmp(&fn[strlen(fn) - 3], "png")) {              /*Check the extension*/
-
+              lv_res_t res = LV_RES_INV;
              /* Read the width and height from the file. They have a constant location:
               * [16..23]: width
               * [24..27]: height
               */
-             FILE* file;
-             file = fopen(fn, "rb" );
-             if(!file) return LV_RES_INV;
-             fseek(file, 16, SEEK_SET);
-             uint32_t size[2];
-             fread(size, 1 , 8, file);
-             fclose(file);
-
-             /*Save the data in the header*/
-             header->always_zero = 0;
-             header->cf = LV_IMG_CF_RAW_ALPHA;
-             /*The width and height are stored in Big endian format so convert them to little endian*/
-             header->w = (lv_coord_t) ((size[0] & 0xff000000) >> 24) +  ((size[0] & 0x00ff0000) >> 8);
-             header->h = (lv_coord_t) ((size[1] & 0xff000000) >> 24) +  ((size[1] & 0x00ff0000) >> 8);
-
-             return LV_RES_OK;
+              lv_fs_file_t file;
+              if (lv_fs_open(&file, fn, LV_FS_MODE_RD) == LV_FS_RES_OK) {
+                  if (lv_fs_seek(&file, 16) == LV_FS_RES_OK) {
+                      uint32_t size[2];
+                       uint32_t br;
+                       if (lv_fs_read(&file, size, 8 , &br) == LV_FS_RES_OK) {
+			    /*Save the data in the header*/
+			    header->always_zero = 0;
+			    header->cf = LV_IMG_CF_RAW_ALPHA;
+			    /*The width and height are stored in Big endian format so convert them to little endian*/
+			    header->w = (lv_coord_t) ((size[0] & 0xff000000) >> 24) +  ((size[0] & 0x00ff0000) >> 8);
+			     header->h = (lv_coord_t) ((size[1] & 0xff000000) >> 24) +  ((size[1] & 0x00ff0000) >> 8);
+			    res = LV_RES_OK;
+                       }
+                 }
+                 lv_fs_close(&file);
+             }
+             return res;
          }
      }
      /*If it's a PNG file in a  C array...*/
@@ -142,6 +144,7 @@ static lv_res_t decoder_open(lv_img_decoder_t * decoder, lv_img_decoder_dsc_t * 
 
             /*Decode the loaded image in ARGB8888 */
             error = lodepng_decode32(&img_data, &png_width, &png_height, png_data, png_data_size);
+            lodepng_free(png_data);
             if(error) {
                 printf("error %u: %s\n", error, lodepng_error_text(error));
                 return LV_RES_INV;
@@ -182,7 +185,7 @@ static lv_res_t decoder_open(lv_img_decoder_t * decoder, lv_img_decoder_dsc_t * 
 static void decoder_close(lv_img_decoder_t * decoder, lv_img_decoder_dsc_t * dsc)
 {
     (void) decoder; /*Unused*/
-    if(dsc->img_data) free((uint8_t *)dsc->img_data);
+    if(dsc->img_data) lv_mem_free((uint8_t *)dsc->img_data);
 }
 
 /**
